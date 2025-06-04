@@ -1,8 +1,4 @@
-import json
-import random
-
-# Sample data pools
-tasks_pool = [
+[
     "Wash the dishes", "Vacuum the living room", "Go for a jog", "Write a blog post", "Read 20 pages of a book",
     "Call a family member", "Organize your desk", "Plan your meals", "Do a workout", "Write in your journal",
     "Clean the bathroom", "Meditate for 10 minutes", "Review your budget", "Back up your files", "Water the plants",
@@ -34,23 +30,3 @@ tasks_pool = [
     "Organize cables", "Check subscriptions", "Create digital folders", "Sort receipts", "Water garden",
     "Repaint a wall", "Clean mirrors", "Take out trash", "Clear browser history", "Organize bookmarks"
 ]
-
-categories = ["Home", "Work", "Fitness", "Learning", "Personal"]
-difficulty_levels = ["Easy", "Medium", "Hard"]
-
-# Generate 150 random tasks
-random_tasks = [
-    {
-        "task": random.choice(tasks_pool),
-        "category": random.choice(categories),
-        "difficulty": random.choice(difficulty_levels)
-    }
-    for _ in range(150)
-]
-
-# Save to a JSON file
-output_path = "/mnt/data/random_tasks_150.json"
-with open(output_path, "w") as f:
-    json.dump(random_tasks, f, indent=2)
-
-output_path
