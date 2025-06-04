@@ -8,29 +8,27 @@ import time
 import requests
 import random
 import os
-import psycopg2 # Import psycopg2
+import psycopg2
 
 # --- CONFIG ---
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-DATABASE_URL = os.environ.get("DATABASE_URL") # Get DATABASE_URL from environment
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if not TOKEN:
     print("CRITICAL ERROR: DISCORD_BOT_TOKEN environment variable not set.")
-    print("Please set the DISCORD_BOT_TOKEN environment variable before running the bot.")
     exit(1)
 
 if not DATABASE_URL:
     print("CRITICAL ERROR: DATABASE_URL environment variable not set.")
-    print("Please set the DATABASE_URL environment variable before running the bot.")
     exit(1)
 
 WEBHOOK_URL = "https://hook.us2.make.com/7ivckygxl1kybhcq5a7trojybp1abp2f"
-COOLDOWN_SECONDS = 3600  # 1 hour
+COOLDOWN_SECONDS = 3600
 
 # --- TASKS ---
 try:
     with open("random_tasks.json", "r") as f:
-        task_list = json.load(f)
+        task_list = [task for task in json.load(f) if isinstance(task, dict)]
 except FileNotFoundError:
     print("ERROR: random_tasks.json not found. Please create it.")
     task_list = []
@@ -58,7 +56,6 @@ def keep_alive():
     Thread(target=run).start()
 
 # --- DATABASE FUNCTIONS ---
-
 def get_db_connection():
     try:
         conn = psycopg2.connect(DATABASE_URL)
@@ -102,7 +99,7 @@ def setup_db():
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await bot.wait_until_ready()
-    setup_db() # Setup database tables on bot startup
+    setup_db()
     try:
         synced = await bot.tree.sync()
         print(f"🔁 Synced {len(synced)} commands")
@@ -117,7 +114,7 @@ async def on_ready():
 @app_commands.describe(category="Optional category filter")
 async def gettask(interaction: discord.Interaction, category: str = None):
     user_id = str(interaction.user.id)
-    now = int(time.time()) # Use int for timestamps to match BIGINT in SQL
+    now = int(time.time())
 
     conn = get_db_connection()
     if not conn:
@@ -125,8 +122,6 @@ async def gettask(interaction: discord.Interaction, category: str = None):
 
     try:
         cursor = conn.cursor()
-
-        # Check cooldown
         cursor.execute("SELECT last_cooldown FROM user_data WHERE user_id = %s", (user_id,))
         result = cursor.fetchone()
         last_cooldown = result[0] if result else 0
@@ -137,11 +132,9 @@ async def gettask(interaction: discord.Interaction, category: str = None):
                 f"⏳ Cooldown active. Try again in {remaining // 60}m {remaining % 60}s.", ephemeral=True
             )
 
-        # Check for active task
         cursor.execute("SELECT * FROM active_tasks WHERE user_id = %s", (user_id,))
         active_task_row = cursor.fetchone()
         if active_task_row:
-             # Check if existing task has expired
             assigned_at = active_task_row[4]
             expires_in = active_task_row[5]
             if now > assigned_at + expires_in:
@@ -150,18 +143,17 @@ async def gettask(interaction: discord.Interaction, category: str = None):
             else:
                 return await interaction.response.send_message("❌ You already have an active task! Complete it with `/taskdone`.", ephemeral=True)
 
-
         if not task_list:
             return await interaction.response.send_message("❌ No tasks available. Please check `random_tasks.json`.", ephemeral=True)
 
-        filtered = [t for t in task_list if not category or t["category"].lower() == category.lower()]
+        filtered = [t for t in task_list if not category or t.get("category", "").lower() == category.lower()]
         if not filtered:
             return await interaction.response.send_message("❌ No tasks in that category.", ephemeral=True)
 
         task_data = random.choice(filtered)
-        expires_in = 3600 # 1 hour
+        print(f"DEBUG selected task: {task_data} | type: {type(task_data)}")
 
-        # Insert/Update active task
+        expires_in = 3600
         cursor.execute("""
             INSERT INTO active_tasks (user_id, task, category, duration, assigned_at, expires_in)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -173,7 +165,6 @@ async def gettask(interaction: discord.Interaction, category: str = None):
                 expires_in = EXCLUDED.expires_in;
         """, (user_id, task_data["task"], task_data["category"], task_data["duration"], now, expires_in))
 
-        # Update cooldown
         cursor.execute("""
             INSERT INTO user_data (user_id, last_cooldown)
             VALUES (%s, %s)
@@ -193,7 +184,11 @@ async def gettask(interaction: discord.Interaction, category: str = None):
 
     except Exception as e:
         print(f"Error in /gettask: {e}")
-        await interaction.response.send_message("❌ An error occurred while getting your task. Please try again.", ephemeral=True)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ An error occurred while getting your task. Please try again.", ephemeral=True)
+        except Exception as inner_e:
+            print(f"Failed to send error message: {inner_e}")
     finally:
         if conn:
             conn.close()
@@ -334,7 +329,6 @@ async def dmme(interaction: discord.Interaction):
     except Exception as e:
         await interaction.response.send_message(f"❌ Failed to DM. An unknown error occurred: {e}", ephemeral=True)
 
-# --- MAIN ---
 if __name__ == "__main__":
     keep_alive()
     bot.run(TOKEN)
