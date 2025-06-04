@@ -1,3 +1,15 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv() # Load environment variables from .env file
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    print("CRITICAL ERROR: DATABASE_URL environment variable not set.")
+    print("Please set the DATABASE_URL environment variable before running the bot.")
+    exit(1)
+
 import discord
 from discord.ext import commands
 from discord import app_commands
