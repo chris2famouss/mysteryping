@@ -1,15 +1,3 @@
-import os
-from dotenv import load_dotenv
-
-load_dotenv() # Load environment variables from .env file
-
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-if not DATABASE_URL:
-    print("CRITICAL ERROR: DATABASE_URL environment variable not set.")
-    print("Please set the DATABASE_URL environment variable before running the bot.")
-    exit(1)
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -19,35 +7,39 @@ import json
 import time
 import requests
 import random
-import os # Import the os module to access environment variables
+import os
+import psycopg2 # Import psycopg2
 
 # --- CONFIG ---
-# IMPORTANT: Load your bot token from an environment variable for security.
-# NEVER hardcode your token directly in the script for public deployment.
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+DATABASE_URL = os.environ.get("DATABASE_URL") # Get DATABASE_URL from environment
 
 if not TOKEN:
     print("CRITICAL ERROR: DISCORD_BOT_TOKEN environment variable not set.")
     print("Please set the DISCORD_BOT_TOKEN environment variable before running the bot.")
-    exit(1) # Exit if the token is not found
+    exit(1)
+
+if not DATABASE_URL:
+    print("CRITICAL ERROR: DATABASE_URL environment variable not set.")
+    print("Please set the DATABASE_URL environment variable before running the bot.")
+    exit(1)
 
 WEBHOOK_URL = "https://hook.us2.make.com/7ivckygxl1kybhcq5a7trojybp1abp2f"
 COOLDOWN_SECONDS = 3600  # 1 hour
 
 # --- TASKS ---
-# This assumes random_tasks.json exists in the same directory.
 try:
     with open("random_tasks.json", "r") as f:
         task_list = json.load(f)
 except FileNotFoundError:
     print("ERROR: random_tasks.json not found. Please create it.")
-    task_list = [] # Initialize as empty to prevent crashes
+    task_list = []
 
 # --- DISCORD SETUP ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
-intents.members = True # Ensure this is enabled in your Discord Developer Portal too
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- FLASK KEEP ALIVE ---
@@ -55,196 +47,294 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    # UptimeRobot will hit this endpoint. Returning a simple string is enough.
     return "Bot is alive!"
 
 def run():
-    # Use the PORT environment variable if available (common in hosting platforms like Heroku/Replit),
-    # otherwise default to 8080 (or any other free port).
     port = int(os.environ.get("PORT", 8080))
     print(f"Flask server running on http://0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    # Start the Flask web server in a separate thread.
-    # This prevents the Flask app from blocking your Discord bot's execution.
     Thread(target=run).start()
 
-# --- STORAGE ---
-active = {}
-scores = {}
-cooldowns = {}
-streaks = {}
+# --- DATABASE FUNCTIONS ---
 
-def save_json(filename, data):
-    with open(filename, "w") as f:
-        json.dump(data, f)
-
-def load_json(filename):
+def get_db_connection():
     try:
-        with open(filename, "r") as f:
-            return json.load(f)
-    except FileNotFoundError: # Handle file not found gracefully
-        return {}
-    except json.JSONDecodeError: # Handle invalid JSON
-        print(f"WARNING: {filename} contains invalid JSON. Starting with empty data.")
-        return {}
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        print(f"Error connecting to database: {e}")
+        return None
 
-def save_all():
-    save_json("active.json", active)
-    save_json("scores.json", scores)
-    save_json("cooldowns.json", cooldowns)
-    save_json("streaks.json", streaks)
+def setup_db():
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS active_tasks (
+                user_id TEXT PRIMARY KEY,
+                task TEXT NOT NULL,
+                category TEXT,
+                duration TEXT,
+                assigned_at BIGINT NOT NULL,
+                expires_in INT NOT NULL
+            );
 
-def load_all():
-    global active, scores, cooldowns, streaks
-    active = load_json("active.json")
-    scores = load_json("scores.json")
-    cooldowns = load_json("cooldowns.json")
-    streaks = load_json("streaks.json")
+            CREATE TABLE IF NOT EXISTS user_data (
+                user_id TEXT PRIMARY KEY,
+                xp INTEGER DEFAULT 0,
+                tasks_completed INTEGER DEFAULT 0,
+                last_cooldown BIGINT DEFAULT 0,
+                streak_last_day INTEGER DEFAULT 0,
+                streak_count INTEGER DEFAULT 0
+            );
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("Database tables checked/created successfully.")
+    else:
+        print("Could not connect to database for setup.")
 
 # --- BOT EVENTS ---
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await bot.wait_until_ready()
+    setup_db() # Setup database tables on bot startup
     try:
-        # Sync slash commands
         synced = await bot.tree.sync()
         print(f"🔁 Synced {len(synced)} commands")
     except Exception as e:
         print(f"❌ Slash command sync failed: {e}")
 
-    # Set custom presence
     activity = discord.Game(name="Mystery Ping Tasks")
     await bot.change_presence(status=discord.Status.online, activity=activity)
-
-    # Load all data when the bot is ready
-    load_all()
-    print("Data loaded from JSON files.")
 
 # --- COMMANDS ---
 @bot.tree.command(name="gettask", description="Get a random task")
 @app_commands.describe(category="Optional category filter")
 async def gettask(interaction: discord.Interaction, category: str = None):
     user_id = str(interaction.user.id)
-    now = time.time()
+    now = int(time.time()) # Use int for timestamps to match BIGINT in SQL
 
-    if user_id in cooldowns and now - cooldowns[user_id] < COOLDOWN_SECONDS:
-        remaining = int(COOLDOWN_SECONDS - (now - cooldowns[user_id]))
-        return await interaction.response.send_message(
-            f"⏳ Cooldown active. Try again in {remaining // 60}m {remaining % 60}s.", ephemeral=True
+    conn = get_db_connection()
+    if not conn:
+        return await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
+
+    try:
+        cursor = conn.cursor()
+
+        # Check cooldown
+        cursor.execute("SELECT last_cooldown FROM user_data WHERE user_id = %s", (user_id,))
+        result = cursor.fetchone()
+        last_cooldown = result[0] if result else 0
+
+        if now - last_cooldown < COOLDOWN_SECONDS:
+            remaining = int(COOLDOWN_SECONDS - (now - last_cooldown))
+            return await interaction.response.send_message(
+                f"⏳ Cooldown active. Try again in {remaining // 60}m {remaining % 60}s.", ephemeral=True
+            )
+
+        # Check for active task
+        cursor.execute("SELECT * FROM active_tasks WHERE user_id = %s", (user_id,))
+        active_task_row = cursor.fetchone()
+        if active_task_row:
+             # Check if existing task has expired
+            assigned_at = active_task_row[4]
+            expires_in = active_task_row[5]
+            if now > assigned_at + expires_in:
+                cursor.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
+                conn.commit()
+            else:
+                return await interaction.response.send_message("❌ You already have an active task! Complete it with `/taskdone`.", ephemeral=True)
+
+
+        if not task_list:
+            return await interaction.response.send_message("❌ No tasks available. Please check `random_tasks.json`.", ephemeral=True)
+
+        filtered = [t for t in task_list if not category or t["category"].lower() == category.lower()]
+        if not filtered:
+            return await interaction.response.send_message("❌ No tasks in that category.", ephemeral=True)
+
+        task_data = random.choice(filtered)
+        expires_in = 3600 # 1 hour
+
+        # Insert/Update active task
+        cursor.execute("""
+            INSERT INTO active_tasks (user_id, task, category, duration, assigned_at, expires_in)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                task = EXCLUDED.task,
+                category = EXCLUDED.category,
+                duration = EXCLUDED.duration,
+                assigned_at = EXCLUDED.assigned_at,
+                expires_in = EXCLUDED.expires_in;
+        """, (user_id, task_data["task"], task_data["category"], task_data["duration"], now, expires_in))
+
+        # Update cooldown
+        cursor.execute("""
+            INSERT INTO user_data (user_id, last_cooldown)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                last_cooldown = EXCLUDED.last_cooldown;
+        """, (user_id, now))
+
+        conn.commit()
+
+        embed = discord.Embed(
+            title=f"🧠 {task_data['task']}",
+            description=f"Category: **{task_data['category']}**\nDuration: **{task_data['duration']}**",
+            color=discord.Color.purple()
         )
+        embed.set_footer(text="🎯 Complete this task and use /taskdone")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    if not task_list:
-        return await interaction.response.send_message("❌ No tasks available. Please check `random_tasks.json`.", ephemeral=True)
-
-    filtered = [t for t in task_list if not category or t["category"].lower() == category.lower()]
-    if not filtered:
-        return await interaction.response.send_message("❌ No tasks in that category.", ephemeral=True)
-
-    task_data = random.choice(filtered)
-    active[user_id] = {
-        "task": task_data["task"],
-        "assigned_at": now,
-        "expires_in": 3600
-    }
-    cooldowns[user_id] = now
-    save_all()
-
-    embed = discord.Embed(
-        title=f"🧠 {task_data['task']}",
-        description=f"Category: **{task_data['category']}**\nDuration: **{task_data['duration']}**",
-        color=discord.Color.purple()
-    )
-    embed.set_footer(text="🎯 Complete this task and use /taskdone")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"Error in /gettask: {e}")
+        await interaction.response.send_message("❌ An error occurred while getting your task. Please try again.", ephemeral=True)
+    finally:
+        if conn:
+            conn.close()
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
-    now = time.time()
+    now = int(time.time())
+    today = int(now // 86400) # Day number for streak calculation
 
-    if user_id not in active:
-        return await interaction.response.send_message("❌ You have no active task!", ephemeral=True)
-
-    task_info = active[user_id]
-    if now > task_info["assigned_at"] + task_info["expires_in"]:
-        del active[user_id]
-        save_all()
-        return await interaction.response.send_message("⚠️ Task expired. Try /gettask again.", ephemeral=True)
-
-    scores.setdefault(user_id, {"xp": 0, "tasks": 0})
-    streaks.setdefault(user_id, {"last_day": 0, "count": 0})
-
-    scores[user_id]["xp"] += 10
-    scores[user_id]["tasks"] += 1
-
-    today = int(time.time() // 86400)
-    if streaks[user_id]["last_day"] == today - 1:
-        streaks[user_id]["count"] += 1
-    elif streaks[user_id]["last_day"] != today:
-        streaks[user_id]["count"] = 1
-    streaks[user_id]["last_day"] = today
-
-    bonus = streaks[user_id]["count"]
-    scores[user_id]["xp"] += bonus
-
-    del active[user_id]
-    save_all()
-
-    level = int((scores[user_id]["xp"] / 10) ** 0.5)
+    conn = get_db_connection()
+    if not conn:
+        return await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
 
     try:
-        requests.post(WEBHOOK_URL, json={
-            "discord_id": user_id,
-            "username": interaction.user.name,
-            "task": task_info["task"],
-            "xp": scores[user_id]["xp"],
-            "level": level,
-            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-        })
-    except requests.exceptions.RequestException as e: # More specific webhook error handling
-        print(f"Webhook error: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred with the webhook: {e}")
+        cursor = conn.cursor()
 
-    await interaction.response.send_message(
-        f"✅ Task complete! XP: **{scores[user_id]['xp']}** | Level: **{level}** | 🔥 Streak: {streaks[user_id]['count']} day(s)",
-        ephemeral=True
-    )
+        # Fetch active task
+        cursor.execute("SELECT task, category, duration, assigned_at, expires_in FROM active_tasks WHERE user_id = %s", (user_id,))
+        task_info = cursor.fetchone()
+
+        if not task_info:
+            return await interaction.response.send_message("❌ You have no active task!", ephemeral=True)
+
+        task_name, task_category, task_duration, assigned_at, expires_in = task_info
+
+        if now > assigned_at + expires_in:
+            cursor.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
+            conn.commit()
+            return await interaction.response.send_message("⚠️ Task expired. Try /gettask again.", ephemeral=True)
+
+        # Fetch or initialize user data
+        cursor.execute("SELECT xp, tasks_completed, streak_last_day, streak_count FROM user_data WHERE user_id = %s", (user_id,))
+        user_data_row = cursor.fetchone()
+
+        current_xp = user_data_row[0] if user_data_row else 0
+        tasks_completed = user_data_row[1] if user_data_row else 0
+        streak_last_day = user_data_row[2] if user_data_row else 0
+        streak_count = user_data_row[3] if user_data_row else 0
+
+        current_xp += 10
+        tasks_completed += 1
+
+        # Calculate streak bonus
+        if streak_last_day == today - 1: # Completed yesterday
+            streak_count += 1
+        elif streak_last_day != today: # Not completed yesterday or today
+            streak_count = 1
+        # If streak_last_day == today, means they already completed a task today,
+        # so we don't increase the streak count for this specific task.
+        # This prevents inflating the streak with multiple tasks in one day.
+
+        bonus_xp = streak_count # Bonus XP equals current streak count
+        current_xp += bonus_xp
+
+        # Update user data in the database
+        cursor.execute("""
+            INSERT INTO user_data (user_id, xp, tasks_completed, streak_last_day, streak_count)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                xp = EXCLUDED.xp,
+                tasks_completed = EXCLUDED.tasks_completed,
+                streak_last_day = EXCLUDED.streak_last_day,
+                streak_count = EXCLUDED.streak_count;
+        """, (user_id, current_xp, tasks_completed, today, streak_count))
+
+        # Delete active task
+        cursor.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
+        conn.commit()
+
+        level = int((current_xp / 10) ** 0.5) # Re-calculate level based on new XP
+
+        try:
+            requests.post(WEBHOOK_URL, json={
+                "discord_id": user_id,
+                "username": interaction.user.name,
+                "task": task_name,
+                "xp": current_xp,
+                "level": level,
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        except requests.exceptions.RequestException as e:
+            print(f"Webhook error: {e}")
+        except Exception as e:
+            print(f"An unexpected error occurred with the webhook: {e}")
+
+        await interaction.response.send_message(
+            f"✅ Task complete! XP: **{current_xp}** | Level: **{level}** | 🔥 Streak: {streak_count} day(s)",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        print(f"Error in /taskdone: {e}")
+        await interaction.response.send_message("❌ An error occurred while completing your task. Please try again.", ephemeral=True)
+    finally:
+        if conn:
+            conn.close()
 
 @bot.tree.command(name="leaderboard", description="See the top 10 users by XP")
 async def leaderboard(interaction: discord.Interaction):
-    if not scores:
-        return await interaction.response.send_message("No data yet!", ephemeral=True)
+    conn = get_db_connection()
+    if not conn:
+        return await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
 
-    top = sorted(scores.items(), key=lambda x: x[1]["xp"], reverse=True)[:10]
-    embed = discord.Embed(title="🏆 Top XP Earners", color=discord.Color.gold())
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, xp, tasks_completed FROM user_data ORDER BY xp DESC LIMIT 10")
+        top_users = cursor.fetchall()
 
-    for i, (uid, data) in enumerate(top, start=1):
-        # Fetching user objects for display is better practice but might be slow for many users.
-        # For simplicity, I'll keep the mention format.
-        # If you need username, consider caching or fetching.
-        embed.add_field(
-            name=f"#{i} • <@{uid}>",
-            value=f"XP: **{data['xp']}** | Tasks: {data['tasks']}",
-            inline=False
-        )
+        if not top_users:
+            return await interaction.response.send_message("No data yet! Be the first to earn XP!", ephemeral=True)
 
-    await interaction.response.send_message(embed=embed)
+        embed = discord.Embed(title="🏆 Top XP Earners", color=discord.Color.gold())
+
+        for i, (uid, xp, tasks) in enumerate(top_users, start=1):
+            embed.add_field(
+                name=f"#{i} • <@{uid}>", # Using mention format, Discord will resolve to username
+                value=f"XP: **{xp}** | Tasks: {tasks}",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed)
+
+    except Exception as e:
+        print(f"Error in /leaderboard: {e}")
+        await interaction.response.send_message("❌ An error occurred while fetching the leaderboard. Please try again.", ephemeral=True)
+    finally:
+        if conn:
+            conn.close()
 
 @bot.tree.command(name="dmme", description="Test if the bot can DM you")
 async def dmme(interaction: discord.Interaction):
     try:
         await interaction.response.send_message("✅ DMing you...", ephemeral=True)
         await interaction.user.send("👋 This is a test DM from the bot.")
-    except discord.Forbidden: # Handle explicit DM blocking
+    except discord.Forbidden:
         await interaction.response.send_message("❌ Failed to DM. It seems you have DMs disabled for this server or for the bot.", ephemeral=True)
-    except Exception as e: # Catch any other errors
+    except Exception as e:
         await interaction.response.send_message(f"❌ Failed to DM. An unknown error occurred: {e}", ephemeral=True)
 
 # --- MAIN ---
 if __name__ == "__main__":
-    keep_alive() # Start the Flask web server
-    bot.run(TOKEN) # Start the Discord bot
+    keep_alive()
+    bot.run(TOKEN)
