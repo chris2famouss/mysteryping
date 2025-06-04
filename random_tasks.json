@@ -1,0 +1,77 @@
+[
+  {
+    "task": "Write a haiku about your mood",
+    "category": "creative",
+    "duration": "10 minutes"
+  },
+  {
+    "task": "Organize your downloads folder",
+    "category": "productivity",
+    "duration": "15 minutes"
+  },
+  {
+    "task": "Do 15 jumping jacks",
+    "category": "health",
+    "duration": "5 minutes"
+  },
+  {
+    "task": "Read one page from a book",
+    "category": "learning",
+    "duration": "10 minutes"
+  },
+  {
+    "task": "Compliment someone in a DM",
+    "category": "social",
+    "duration": "5 minutes"
+  },
+  {
+    "task": "Write down three things you're grateful for",
+    "category": "mindfulness",
+    "duration": "5 minutes"
+  },
+  {
+    "task": "Listen to your favorite song and vibe",
+    "category": "fun",
+    "duration": "4 minutes"
+  },
+  {
+    "task": "Take a 5-minute break and close your eyes",
+    "category": "mental health",
+    "duration": "5 minutes"
+  },
+  {
+    "task": "Clean one item off your desk",
+    "category": "cleaning",
+    "duration": "5 minutes"
+  },
+  {
+    "task": "Look outside and describe what you see in your head",
+    "category": "mindfulness",
+    "duration": "2 minutes"
+  },
+  {
+    "task": "Solve a basic math problem in your head",
+    "category": "learning",
+    "duration": "3 minutes"
+  },
+  {
+    "task": "Sketch something on paper or in a drawing app",
+    "category": "creative",
+    "duration": "15 minutes"
+  },
+  {
+    "task": "Stretch your arms above your head for 60 seconds",
+    "category": "health",
+    "duration": "1 minute"
+  },
+  {
+    "task": "Make a to-do list for tomorrow",
+    "category": "planning",
+    "duration": "10 minutes"
+  },
+  {
+    "task": "Send a positive message to someone you haven't talked to in a while",
+    "category": "social",
+    "duration": "5 minutes"
+  }
+]
