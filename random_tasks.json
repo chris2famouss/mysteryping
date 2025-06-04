@@ -93,7 +93,7 @@
   {"task": "Do 3 sets of 15 bird-dog exercises", "category": "Body", "duration": "5 mins"},
   {"task": "Explore a virtual museum tour online", "category": "Discovery", "duration": "15 mins"},
   {"task": "Wipe down dusty baseboards in one room", "category": "Environment", "duration": "10 mins"},
-  {"task": "Create a "to-do" list for a small, achievable task", "category": "Organization", "duration": "5 mins"},
+  {"task": "Create a to do list for a small, achievable task", "category": "Organization", "duration": "5 mins"},
   {"task": "Draw something using only geometric shapes", "category": "Creativity", "duration": "10 mins"},
   {"task": "Do 3 sets of 10 glute bridges", "category": "Body", "duration": "5 mins"},
   {"task": "Learn about a new constellation or planet", "category": "Mind", "duration": "5 mins"},
