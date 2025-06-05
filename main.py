@@ -136,7 +136,6 @@ async def gettask(interaction: discord.Interaction):
 
         try:
             await user.send(embed=embed)
-            await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
 
