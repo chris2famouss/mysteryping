@@ -112,35 +112,64 @@ async def on_ready():
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
 # --- COMMANDS ---
+import discord
+from discord.ext import commands
+from discord import app_commands
+import json
+import time
+import random
+
+# --- GLOBALS ---
+active = {}
+
+# --- COMMAND ---
 @bot.tree.command(name="gettask", description="Sends you a random task via DM.")
 async def gettask(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)  # Acknowledge the command
+    await interaction.response.defer(ephemeral=True)
 
     user_id = interaction.user.id
 
-    # Example task embed
-    embed = discord.Embed(
-        title="🎯 Your Task",
-        description="Here's your random task. Complete it and come back!",
-        color=discord.Color.blue()
-    )
-
     try:
-        # Attempt to DM the user
+        # Load tasks from the JSON file
+        with open("random_tasks.json", "r") as f:
+            tasks = json.load(f)
+
+        # Handle if empty
+        if not tasks:
+            await interaction.followup.send("❌ No tasks available. Please check `random_tasks.json`.", ephemeral=True)
+            return
+
+        # Pick a random task
+        task = random.choice(tasks)
+
+        # Create the task embed
+        embed = discord.Embed(
+            title="🎯 Your Task",
+            description=task,
+            color=discord.Color.green()
+        )
+
+        # DM the user
         await interaction.user.send(embed=embed)
 
-        # Track the active task
+        # Save active task state
         active[user_id] = {
+            "task": task,
             "timestamp": time.time(),
             "status": "waiting_for_completion"
         }
 
-        # Send confirmation as follow-up
         await interaction.followup.send("📩 Task sent to your DMs!", ephemeral=True)
 
     except discord.Forbidden:
-        # Handle if user has DMs closed
         await interaction.followup.send("❌ I couldn't DM you. Please open your DMs and try again.", ephemeral=True)
+
+    except FileNotFoundError:
+        await interaction.followup.send("❌ Task file not found. Make sure `random_tasks.json` exists.", ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ An unexpected error occurred: `{str(e)}`", ephemeral=True)
+
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
