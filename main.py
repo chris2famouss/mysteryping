@@ -111,7 +111,7 @@ async def on_ready():
     activity = discord.Game(name="Mystery Ping Tasks")
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
-# --- COMMAND ---
+# --- COMMANDS ---
 @bot.tree.command(name="gettask", description="Sends you a random task via DM.")
 async def gettask(interaction: discord.Interaction):
     user = interaction.user
@@ -135,35 +135,36 @@ async def gettask(interaction: discord.Interaction):
         embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
         embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
 
-        # Immediately respond to the interaction so we don't hit timeout
-        await interaction.response.send_message("📩 Sending you a task in DMs...", ephemeral=True)
-
+        # Try to DM user first
         try:
             await user.send(embed=embed)
-            # Save active task
-            active[user_id] = {
-                "task": task,
-                "timestamp": time.time(),
-                "status": "waiting_for_completion"
-            }
         except discord.Forbidden:
-            # DM failed, notify user with followup message
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True
             )
+            return
+
+        # DM succeeded, respond once here
+        await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
+
+        # Save active task
+        active[user_id] = {
+            "task": task,
+            "timestamp": time.time(),
+            "status": "waiting_for_completion"
+        }
+
     except Exception as e:
-        # Handle unexpected errors
         if not interaction.response.is_done():
             await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
         else:
             print(f"[ERROR] gettask: {e}")
 
-
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     now = int(time.time())
-    today = int(now // 86400) # Day number for streak calculation
+    today = int(now // 86400)  # Day number for streak calculation
 
     conn = get_db_connection()
     if not conn:
@@ -172,7 +173,6 @@ async def taskdone(interaction: discord.Interaction):
     try:
         cursor = conn.cursor()
 
-        # Fetch active task
         cursor.execute("SELECT task, category, duration, assigned_at, expires_in FROM active_tasks WHERE user_id = %s", (user_id,))
         task_info = cursor.fetchone()
 
@@ -186,7 +186,6 @@ async def taskdone(interaction: discord.Interaction):
             conn.commit()
             return await interaction.response.send_message("⚠️ Task expired. Try /gettask again.", ephemeral=True)
 
-        # Fetch or initialize user data
         cursor.execute("SELECT xp, tasks_completed, streak_last_day, streak_count FROM user_data WHERE user_id = %s", (user_id,))
         user_data_row = cursor.fetchone()
 
@@ -198,19 +197,14 @@ async def taskdone(interaction: discord.Interaction):
         current_xp += 10
         tasks_completed += 1
 
-        # Calculate streak bonus
-        if streak_last_day == today - 1: # Completed yesterday
+        if streak_last_day == today - 1:
             streak_count += 1
-        elif streak_last_day != today: # Not completed yesterday or today
+        elif streak_last_day != today:
             streak_count = 1
-        # If streak_last_day == today, means they already completed a task today,
-        # so we don't increase the streak count for this specific task.
-        # This prevents inflating the streak with multiple tasks in one day.
 
-        bonus_xp = streak_count # Bonus XP equals current streak count
+        bonus_xp = streak_count
         current_xp += bonus_xp
 
-        # Update user data in the database
         cursor.execute("""
             INSERT INTO user_data (user_id, xp, tasks_completed, streak_last_day, streak_count)
             VALUES (%s, %s, %s, %s, %s)
@@ -221,11 +215,10 @@ async def taskdone(interaction: discord.Interaction):
                 streak_count = EXCLUDED.streak_count;
         """, (user_id, current_xp, tasks_completed, today, streak_count))
 
-        # Delete active task
         cursor.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
         conn.commit()
 
-        level = int((current_xp / 10) ** 0.5) # Re-calculate level based on new XP
+        level = int((current_xp / 10) ** 0.5)
 
         try:
             requests.post(WEBHOOK_URL, json={
@@ -271,7 +264,7 @@ async def leaderboard(interaction: discord.Interaction):
 
         for i, (uid, xp, tasks) in enumerate(top_users, start=1):
             embed.add_field(
-                name=f"#{i} • <@{uid}>", # Using mention format, Discord will resolve to username
+                name=f"#{i} • <@{uid}>",
                 value=f"XP: **{xp}** | Tasks: {tasks}",
                 inline=False
             )
