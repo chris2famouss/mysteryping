@@ -79,7 +79,8 @@ def setup_db():
                 assigned_at BIGINT NOT NULL,
                 expires_in INT NOT NULL
             );
-
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_data (
                 user_id TEXT PRIMARY KEY,
                 xp INTEGER DEFAULT 0,
@@ -138,8 +139,8 @@ async def gettask(interaction: discord.Interaction):
 
         try:
             await user.send(embed=embed)
-            await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
-
+            if not interaction.response.is_done():
+                await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
         except discord.Forbidden:
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
