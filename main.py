@@ -144,16 +144,10 @@ async def gettask(interaction: discord.Interaction):
         except discord.Forbidden:
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
-            else:
-                await interaction.followup.send("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
 
     except Exception as e:
         if not interaction.response.is_done():
             await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
-        else:
-            await interaction.followup.send(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
-
-
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
