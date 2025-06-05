@@ -111,32 +111,13 @@ async def on_ready():
     activity = discord.Game(name="Mystery Ping Tasks")
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
-# --- COMMANDS ---
-import discord
-from discord.ext import commands
-from discord import app_commands
-import json
-import time
-import random
-
-# --- GLOBALS ---
-active = {}
-
-# --- COMMAND ---
-import discord
-from discord.ext import commands
-from discord import app_commands
-import json
-import time
-import random
-
-# --- GLOBALS ---
-active = {}
-
 # --- COMMAND ---
 @bot.tree.command(name="gettask", description="Sends you a random task via DM.")
 async def gettask(interaction: discord.Interaction):
-    user_id = interaction.user.id
+    user = interaction.user
+    user_id = user.id
+
+    print(f"[DEBUG] gettask called by {user.name} ({user_id})")
 
     try:
         # Load tasks
@@ -144,25 +125,29 @@ async def gettask(interaction: discord.Interaction):
             tasks = json.load(f)
 
         if not tasks:
-            await interaction.response.send_message("❌ No tasks available in `random_tasks.json`.", ephemeral=True)
+            await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
             return
 
-        # Pick a random task
+        # Pick random task
         task = random.choice(tasks)
 
-        # Create embed
+        # Build embed
         embed = discord.Embed(
             title="🎯 Your Task",
-            description=task.get("task", "No task description."),
+            description=task.get("task", "No description."),
             color=discord.Color.blurple()
         )
         embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
         embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
 
-        # Try to DM the user
-        await interaction.user.send(embed=embed)
+        # DM the user
+        try:
+            await user.send(embed=embed)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
+            return
 
-        # Save task
+        # Store task info
         active[user_id] = {
             "task": task,
             "timestamp": time.time(),
@@ -172,14 +157,12 @@ async def gettask(interaction: discord.Interaction):
         # Confirm in server
         await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
 
-    except discord.Forbidden:
-        await interaction.response.send_message("❌ Couldn't DM you. Please check your privacy settings.", ephemeral=True)
-
     except FileNotFoundError:
-        await interaction.response.send_message("❌ `random_tasks.json` not found.", ephemeral=True)
-
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ `random_tasks.json` file not found.", ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
 
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
