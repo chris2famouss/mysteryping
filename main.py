@@ -123,6 +123,17 @@ import random
 active = {}
 
 # --- COMMAND ---
+import discord
+from discord.ext import commands
+from discord import app_commands
+import json
+import time
+import random
+
+# --- GLOBALS ---
+active = {}
+
+# --- COMMAND ---
 @bot.tree.command(name="gettask", description="Sends you a random task via DM.")
 async def gettask(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -130,29 +141,31 @@ async def gettask(interaction: discord.Interaction):
     user_id = interaction.user.id
 
     try:
-        # Load tasks from the JSON file
+        # Load task list from JSON file
         with open("random_tasks.json", "r") as f:
             tasks = json.load(f)
 
-        # Handle if empty
         if not tasks:
             await interaction.followup.send("❌ No tasks available. Please check `random_tasks.json`.", ephemeral=True)
             return
 
-        # Pick a random task
+        # Select a random task (dictionary)
         task = random.choice(tasks)
 
-        # Create the task embed
+        # Build embed from task object
         embed = discord.Embed(
             title="🎯 Your Task",
-            description=task,
-            color=discord.Color.green()
+            description=task.get("task", "No task description."),
+            color=discord.Color.teal()
         )
 
-        # DM the user
+        embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
+        embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
+
+        # Send DM
         await interaction.user.send(embed=embed)
 
-        # Save active task state
+        # Track active task
         active[user_id] = {
             "task": task,
             "timestamp": time.time(),
