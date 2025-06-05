@@ -111,87 +111,33 @@ async def on_ready():
 
 # --- COMMANDS ---
 @bot.tree.command(name="gettask", description="Get a random task")
-@app_commands.describe(category="Optional category filter")
-async def gettask(interaction: discord.Interaction, category: str = None):
+async def gettask(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
-    now = int(time.time())
+    task_data = random.choice(task_list)
 
-    conn = get_db_connection()
-    if not conn:
-        return await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
+    embed = discord.Embed(
+        title="🧠 Mystery Task",
+        description=f"**{task_data['task']}**",
+        color=discord.Color.orange()
+    )
+    embed.set_footer(text="🎯 Complete this task, then type /taskdone to earn XP!")
+    embed.set_thumbnail(url="https://i.imgur.com/8yZ7QqD.gif")
 
+    # Try sending a DM
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT last_cooldown FROM user_data WHERE user_id = %s", (user_id,))
-        result = cursor.fetchone()
-        last_cooldown = result[0] if result else 0
+        await interaction.user.send(embed=embed)
+        await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
 
-        if now - last_cooldown < COOLDOWN_SECONDS:
-            remaining = int(COOLDOWN_SECONDS - (now - last_cooldown))
-            return await interaction.response.send_message(
-                f"⏳ Cooldown active. Try again in {remaining // 60}m {remaining % 60}s.", ephemeral=True
-            )
+        # Save task to active
+        active[user_id] = {
+            "task": task_data["task"],
+            "assigned_at": time.time(),
+            "expires_in": 3600  # 1 hour
+        }
+        save_active_tasks(active)
 
-        cursor.execute("SELECT * FROM active_tasks WHERE user_id = %s", (user_id,))
-        active_task_row = cursor.fetchone()
-        if active_task_row:
-            assigned_at = active_task_row[4]
-            expires_in = active_task_row[5]
-            if now > assigned_at + expires_in:
-                cursor.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
-                conn.commit()
-            else:
-                return await interaction.response.send_message("❌ You already have an active task! Complete it with `/taskdone`.", ephemeral=True)
-
-        if not task_list:
-            return await interaction.response.send_message("❌ No tasks available. Please check `random_tasks.json`.", ephemeral=True)
-
-        filtered = [t for t in task_list if not category or t.get("category", "").lower() == category.lower()]
-        if not filtered:
-            return await interaction.response.send_message("❌ No tasks in that category.", ephemeral=True)
-
-        task_data = random.choice(filtered)
-        print(f"DEBUG selected task: {task_data} | type: {type(task_data)}")
-
-        expires_in = 3600
-        cursor.execute("""
-            INSERT INTO active_tasks (user_id, task, category, duration, assigned_at, expires_in)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET
-                task = EXCLUDED.task,
-                category = EXCLUDED.category,
-                duration = EXCLUDED.duration,
-                assigned_at = EXCLUDED.assigned_at,
-                expires_in = EXCLUDED.expires_in;
-        """, (user_id, task_data["task"], task_data["category"], task_data["duration"], now, expires_in))
-
-        cursor.execute("""
-            INSERT INTO user_data (user_id, last_cooldown)
-            VALUES (%s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET
-                last_cooldown = EXCLUDED.last_cooldown;
-        """, (user_id, now))
-
-        conn.commit()
-
-        embed = discord.Embed(
-            title=f"🧠 {task_data['task']}",
-            description=f"Category: **{task_data['category']}**\nDuration: **{task_data['duration']}**",
-            color=discord.Color.purple()
-        )
-        embed.set_footer(text="🎯 Complete this task and use /taskdone")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    except Exception as e:
-        print(f"Error in /gettask: {e}")
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ An error occurred while getting your task. Please try again.", ephemeral=True)
-        except Exception as inner_e:
-            print(f"Failed to send error message: {inner_e}")
-    finally:
-        if conn:
-            conn.close()
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ I can't DM you! Please enable DMs from server members.", ephemeral=True)
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
