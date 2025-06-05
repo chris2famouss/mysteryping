@@ -112,34 +112,35 @@ async def on_ready():
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
 # --- COMMANDS ---
-@bot.tree.command(name="gettask", description="Get a random task")
+@bot.tree.command(name="gettask", description="Sends you a random task via DM.")
 async def gettask(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    task_data = random.choice(task_list)
+    await interaction.response.defer(ephemeral=True)  # Acknowledge the command
 
+    user_id = interaction.user.id
+
+    # Example task embed
     embed = discord.Embed(
-        title="🧠 Mystery Task",
-        description=f"**{task_data['task']}**",
-        color=discord.Color.orange()
+        title="🎯 Your Task",
+        description="Here's your random task. Complete it and come back!",
+        color=discord.Color.blue()
     )
-    embed.set_footer(text="🎯 Complete this task, then type /taskdone to earn XP!")
-    embed.set_thumbnail(url="https://i.imgur.com/8yZ7QqD.gif")
 
-    # Try sending a DM
     try:
+        # Attempt to DM the user
         await interaction.user.send(embed=embed)
-        await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
 
-        # Save task to active
+        # Track the active task
         active[user_id] = {
-            "task": task_data["task"],
-            "assigned_at": time.time(),
-            "expires_in": 3600  # 1 hour
+            "timestamp": time.time(),
+            "status": "waiting_for_completion"
         }
-        save_active_tasks(active)
+
+        # Send confirmation as follow-up
+        await interaction.followup.send("📩 Task sent to your DMs!", ephemeral=True)
 
     except discord.Forbidden:
-        await interaction.response.send_message("❌ I can't DM you! Please enable DMs from server members.", ephemeral=True)
+        # Handle if user has DMs closed
+        await interaction.followup.send("❌ I couldn't DM you. Please open your DMs and try again.", ephemeral=True)
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
