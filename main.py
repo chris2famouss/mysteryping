@@ -121,10 +121,7 @@ async def gettask(interaction: discord.Interaction):
             tasks = json.load(f)
 
         if not tasks:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
-            else:
-                await interaction.followup.send("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
+            await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
             return
 
         task = random.choice(tasks)
@@ -139,15 +136,12 @@ async def gettask(interaction: discord.Interaction):
 
         try:
             await user.send(embed=embed)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
+            await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
         except discord.Forbidden:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
+            await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
 
     except Exception as e:
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
