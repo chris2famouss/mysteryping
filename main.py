@@ -115,14 +115,15 @@ async def on_ready():
 @bot.tree.command(name="gettask", description="Sends you a random task via DM.")
 async def gettask(interaction: discord.Interaction):
     user = interaction.user
-    user_id = user.id
-
     try:
         with open("random_tasks.json", "r") as f:
             tasks = json.load(f)
 
         if not tasks:
-            await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
             return
 
         task = random.choice(tasks)
@@ -135,30 +136,22 @@ async def gettask(interaction: discord.Interaction):
         embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
         embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
 
-        # Try to DM user first
         try:
             await user.send(embed=embed)
+            await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
+
         except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True
-            )
-            return
-
-        # DM succeeded, respond once here
-        await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
-
-        # Save active task
-        active[user_id] = {
-            "task": task,
-            "timestamp": time.time(),
-            "status": "waiting_for_completion"
-        }
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
 
     except Exception as e:
         if not interaction.response.is_done():
             await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
         else:
-            print(f"[ERROR] gettask: {e}")
+            await interaction.followup.send(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
+
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
