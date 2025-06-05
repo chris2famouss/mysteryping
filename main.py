@@ -117,21 +117,15 @@ async def gettask(interaction: discord.Interaction):
     user = interaction.user
     user_id = user.id
 
-    print(f"[DEBUG] gettask called by {user.name} ({user_id})")
-
     try:
-        # Load tasks
         with open("random_tasks.json", "r") as f:
             tasks = json.load(f)
 
         if not tasks:
-            await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
-            return
+            return await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
 
-        # Pick random task
         task = random.choice(tasks)
 
-        # Build embed
         embed = discord.Embed(
             title="🎯 Your Task",
             description=task.get("task", "No description."),
@@ -140,30 +134,30 @@ async def gettask(interaction: discord.Interaction):
         embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
         embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
 
-        # DM the user
+        # Try to DM the user first
         try:
             await user.send(embed=embed)
         except discord.Forbidden:
-            await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
-            return
+            return await interaction.response.send_message(
+                "❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True
+            )
 
-        # Store task info
+        # Save active task
         active[user_id] = {
             "task": task,
             "timestamp": time.time(),
             "status": "waiting_for_completion"
         }
 
-        # Confirm in server
+        # Acknowledge only once here
         await interaction.response.send_message("📩 Task sent to your DMs!", ephemeral=True)
 
-    except FileNotFoundError:
-        if not interaction.response.is_done():
-            await interaction.response.send_message("❌ `random_tasks.json` file not found.", ephemeral=True)
     except Exception as e:
+        # Only send error if response not already sent
         if not interaction.response.is_done():
             await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
-
+        else:
+            print(f"[ERROR] gettask: {e}")
 
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
