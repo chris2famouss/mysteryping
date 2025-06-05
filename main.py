@@ -25,6 +25,8 @@ if not DATABASE_URL:
 WEBHOOK_URL = "https://hook.us2.make.com/7ivckygxl1kybhcq5a7trojybp1abp2f"
 COOLDOWN_SECONDS = 3600
 
+active = {}
+
 # --- TASKS ---
 try:
     with open("random_tasks.json", "r") as f:
