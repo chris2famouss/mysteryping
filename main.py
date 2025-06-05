@@ -128,7 +128,8 @@ async def gettask(interaction: discord.Interaction):
     # Only DM the user, and only send a response if DM fails
     try:
         await user.send(embed=embed)
-        await interaction.response.send_message("✅ Check your DMs for your task!", ephemeral=True)
+        # Only acknowledge the interaction silently (no message in channel)
+        await interaction.response.defer(ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
 
