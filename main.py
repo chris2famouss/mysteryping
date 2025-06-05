@@ -13,34 +13,15 @@ import psycopg2
 # --- CONFIG ---
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
+WEBHOOK_URL = "https://hook.us2.make.com/7ivckygxl1kybhcq5a7trojybp1abp2f"
+COOLDOWN_SECONDS = 3600
 
 if not TOKEN:
     print("CRITICAL ERROR: DISCORD_BOT_TOKEN environment variable not set.")
     exit(1)
-
 if not DATABASE_URL:
     print("CRITICAL ERROR: DATABASE_URL environment variable not set.")
     exit(1)
-
-WEBHOOK_URL = "https://hook.us2.make.com/7ivckygxl1kybhcq5a7trojybp1abp2f"
-COOLDOWN_SECONDS = 3600
-
-active = {}
-
-# --- TASKS ---
-try:
-    with open("random_tasks.json", "r") as f:
-        task_list = [task for task in json.load(f) if isinstance(task, dict)]
-except FileNotFoundError:
-    print("ERROR: random_tasks.json not found. Please create it.")
-    task_list = []
-
-# --- DISCORD SETUP ---
-intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
-intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- FLASK KEEP ALIVE ---
 app = Flask('')
@@ -60,8 +41,7 @@ def keep_alive():
 # --- DATABASE FUNCTIONS ---
 def get_db_connection():
     try:
-        conn = psycopg2.connect(DATABASE_URL)
-        return conn
+        return psycopg2.connect(DATABASE_URL)
     except Exception as e:
         print(f"Error connecting to database: {e}")
         return None
@@ -97,6 +77,13 @@ def setup_db():
     else:
         print("Could not connect to database for setup.")
 
+# --- DISCORD SETUP ---
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.members = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # --- BOT EVENTS ---
 @bot.event
 async def on_ready():
@@ -108,7 +95,6 @@ async def on_ready():
         print(f"🔁 Synced {len(synced)} commands")
     except Exception as e:
         print(f"❌ Slash command sync failed: {e}")
-
     activity = discord.Game(name="Mystery Ping Tasks")
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
@@ -118,29 +104,34 @@ async def gettask(interaction: discord.Interaction):
     user = interaction.user
     try:
         with open("random_tasks.json", "r") as f:
-            tasks = json.load(f)
-
-        if not tasks:
-            await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
-            return
-
-        task = random.choice(tasks)
-
-        embed = discord.Embed(
-            title="🎯 Your Task",
-            description=task.get("task", "No description."),
-            color=discord.Color.blurple()
-        )
-        embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
-        embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
-
-        try:
-            await user.send(embed=embed)
-        except discord.Forbidden:
-            await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
-
+            tasks = [task for task in json.load(f) if isinstance(task, dict)]
+    except FileNotFoundError:
+        await interaction.response.send_message("❌ `random_tasks.json` not found.", ephemeral=True)
+        return
     except Exception as e:
         await interaction.response.send_message(f"⚠️ Unexpected error: `{str(e)}`", ephemeral=True)
+        return
+
+    if not tasks:
+        await interaction.response.send_message("❌ No tasks found in `random_tasks.json`.", ephemeral=True)
+        return
+
+    task = random.choice(tasks)
+    embed = discord.Embed(
+        title="🎯 Your Task",
+        description=task.get("task", "No description."),
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="Category", value=task.get("category", "N/A"), inline=True)
+    embed.add_field(name="Duration", value=task.get("duration", "N/A"), inline=True)
+
+    # Only DM the user, and only send a response if DM fails
+    try:
+        await user.send(embed=embed)
+        await interaction.response.send_message("✅ Check your DMs for your task!", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ I couldn't DM you. Please check your privacy settings.", ephemeral=True)
+
 @bot.tree.command(name="taskdone", description="Mark your task as complete")
 async def taskdone(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
@@ -149,27 +140,28 @@ async def taskdone(interaction: discord.Interaction):
 
     conn = get_db_connection()
     if not conn:
-        return await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
+        await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
+        return
 
     try:
         cursor = conn.cursor()
-
         cursor.execute("SELECT task, category, duration, assigned_at, expires_in FROM active_tasks WHERE user_id = %s", (user_id,))
         task_info = cursor.fetchone()
 
         if not task_info:
-            return await interaction.response.send_message("❌ You have no active task!", ephemeral=True)
+            await interaction.response.send_message("❌ You have no active task!", ephemeral=True)
+            return
 
         task_name, task_category, task_duration, assigned_at, expires_in = task_info
 
         if now > assigned_at + expires_in:
             cursor.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
             conn.commit()
-            return await interaction.response.send_message("⚠️ Task expired. Try /gettask again.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Task expired. Try /gettask again.", ephemeral=True)
+            return
 
         cursor.execute("SELECT xp, tasks_completed, streak_last_day, streak_count FROM user_data WHERE user_id = %s", (user_id,))
         user_data_row = cursor.fetchone()
-
         current_xp = user_data_row[0] if user_data_row else 0
         tasks_completed = user_data_row[1] if user_data_row else 0
         streak_last_day = user_data_row[2] if user_data_row else 0
@@ -210,28 +202,25 @@ async def taskdone(interaction: discord.Interaction):
                 "level": level,
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
             })
-        except requests.exceptions.RequestException as e:
-            print(f"Webhook error: {e}")
         except Exception as e:
-            print(f"An unexpected error occurred with the webhook: {e}")
+            print(f"Webhook error: {e}")
 
         await interaction.response.send_message(
             f"✅ Task complete! XP: **{current_xp}** | Level: **{level}** | 🔥 Streak: {streak_count} day(s)",
             ephemeral=True
         )
-
     except Exception as e:
         print(f"Error in /taskdone: {e}")
         await interaction.response.send_message("❌ An error occurred while completing your task. Please try again.", ephemeral=True)
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
 @bot.tree.command(name="leaderboard", description="See the top 10 users by XP")
 async def leaderboard(interaction: discord.Interaction):
     conn = get_db_connection()
     if not conn:
-        return await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
+        await interaction.response.send_message("❌ Database error. Please try again later.", ephemeral=True)
+        return
 
     try:
         cursor = conn.cursor()
@@ -239,31 +228,28 @@ async def leaderboard(interaction: discord.Interaction):
         top_users = cursor.fetchall()
 
         if not top_users:
-            return await interaction.response.send_message("No data yet! Be the first to earn XP!", ephemeral=True)
+            await interaction.response.send_message("No data yet! Be the first to earn XP!", ephemeral=True)
+            return
 
         embed = discord.Embed(title="🏆 Top XP Earners", color=discord.Color.gold())
-
         for i, (uid, xp, tasks) in enumerate(top_users, start=1):
             embed.add_field(
                 name=f"#{i} • <@{uid}>",
                 value=f"XP: **{xp}** | Tasks: {tasks}",
                 inline=False
             )
-
         await interaction.response.send_message(embed=embed)
-
     except Exception as e:
         print(f"Error in /leaderboard: {e}")
         await interaction.response.send_message("❌ An error occurred while fetching the leaderboard. Please try again.", ephemeral=True)
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
 @bot.tree.command(name="dmme", description="Test if the bot can DM you")
 async def dmme(interaction: discord.Interaction):
     try:
-        await interaction.response.send_message("✅ DMing you...", ephemeral=True)
         await interaction.user.send("👋 This is a test DM from the bot.")
+        await interaction.response.send_message("✅ DM sent! Check your inbox.", ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message("❌ Failed to DM. It seems you have DMs disabled for this server or for the bot.", ephemeral=True)
     except Exception as e:
